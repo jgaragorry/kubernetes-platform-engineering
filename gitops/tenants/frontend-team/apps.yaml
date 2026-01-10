@@ -12,7 +12,7 @@ spec:
     repoURL: https://charts.bitnami.com/bitnami
     chart: nginx
     # Dejamos que tome la última versión estable (HEAD)
-    targetRevision: 19.0.0
+    targetRevision: "*"
   destination:
     server: https://kubernetes.default.svc
     namespace: frontend-ns
