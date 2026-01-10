@@ -8,11 +8,10 @@ metadata:
 spec:
   project: default
   source:
-    # ✅ CORRECCIÓN: Usamos el repo oficial estable
-    repoURL: https://charts.bitnami.com/bitnami
-    chart: nginx
-    # Dejamos que tome la última versión estable (HEAD)
-    targetRevision: "*"
+    # ✅ CAMBIO: Usamos Podinfo que es 100% fiable para demos
+    repoURL: https://stefanprodan.github.io/podinfo
+    chart: podinfo
+    targetRevision: 6.7.0
   destination:
     server: https://kubernetes.default.svc
     namespace: frontend-ns
