@@ -8,9 +8,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://bitnami-labs.github.io/observed-k8s/
-    targetRevision: 0.1.0
+    # ✅ CORRECCIÓN: Usamos el repo oficial estable
+    repoURL: https://charts.bitnami.com/bitnami
     chart: nginx
+    # Dejamos que tome la última versión estable (HEAD)
+    targetRevision: ""
   destination:
     server: https://kubernetes.default.svc
     namespace: frontend-ns
