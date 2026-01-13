@@ -18,7 +18,7 @@ Este documento es la guía definitiva para desplegar, operar y destruir la plata
 4. [Fase 3: SecretOps (Seguridad Bancaria)](#-fase-3-secretops-seguridad-bancaria)
 5. [Fase 4: Validación de la Plataforma](#-fase-4-validación-de-la-plataforma)
 6. [🌟 Fase Bonus: Day 2 Operations](#-fase-bonus-day-2-operations-escalamiento)
-7. [🛑 Fase 5: Protocolo FinOps (Destrucción)](#-fase-5-protocolo-finops-destrucción)
+7. [🛑 Fase 5: Protocolo FinOps (Destrucción Total)](#-fase-5-protocolo-finops-destrucción-total)
 
 ---
 
@@ -178,11 +178,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://stefanprodan.github.io/podinfo
+    repoURL: [https://stefanprodan.github.io/podinfo](https://stefanprodan.github.io/podinfo)
     targetRevision: 6.7.0
     chart: podinfo
   destination:
-    server: https://kubernetes.default.svc
+    server: [https://kubernetes.default.svc](https://kubernetes.default.svc)
     namespace: marketing-ns
   syncPolicy:
     automated:
@@ -215,44 +215,83 @@ git push
 
 ---
 
-## 🛑 Fase 5: Protocolo FinOps (Destrucción)
+## 🛑 Fase 5: Protocolo FinOps (Destrucción Total)
 
-**⚠️ IMPORTANTE:** Sigue este orden estricto para evitar costos.
+**⚠️ ADVERTENCIA:** Esta fase es destructiva. Sigue los pasos en orden para garantizar que no queden costos residuales ("Costos Fantasma").
 
-### 5.1 Soft Delete (Limpieza de Apps)
+### 5.1 Soft Delete (Limpieza de Aplicaciones)
+Primero eliminamos las apps para que los balanceadores de carga se liberen correctamente.
 ```bash
 kubectl delete application -n argocd --all
+# Espera 1 minuto para asegurar que los controladores de Ingress liberen los recursos
+sleep 60
 ```
 
-### 5.2 Limpieza Manual de Seguridad
+### 5.2 Limpieza de Seguridad (IAM & Secrets)
+Este bloque borra el secreto en AWS y el usuario IAM, asegurándose de eliminar **todas** sus access keys primero.
 ```bash
-# Borrar Secreto AWS
+# 1. Borrar Secreto en AWS Secrets Manager
 aws secretsmanager delete-secret --secret-id prod/db-password --force-delete-without-recovery --region us-east-1
 
-# Borrar Usuario IAM
-AK_ID=$(aws iam list-access-keys --user-name eks-secrets-reader --query 'AccessKeyMetadata[0].AccessKeyId' --output text)
-aws iam delete-access-key --user-name eks-secrets-reader --access-key-id $AK_ID
+# 2. Borrar TODAS las Access Keys del usuario (Loop de seguridad)
+for key in $(aws iam list-access-keys --user-name eks-secrets-reader --query 'AccessKeyMetadata[*].AccessKeyId' --output text); do
+  echo "Borrando llave: $key"
+  aws iam delete-access-key --user-name eks-secrets-reader --access-key-id $key
+done
+
+# 3. Desvincular políticas y borrar usuario
 aws iam detach-user-policy --user-name eks-secrets-reader --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
 aws iam delete-user --user-name eks-secrets-reader
 ```
 
-### 5.3 Nuke Load Balancers (Crucial)
+### 5.3 Nuke Load Balancers (Red de Seguridad)
+Si algún balanceador quedó huérfano, este script lo detecta y elimina.
 ```bash
 ./scripts/nuke_loadbalancers.sh
 ```
 
-### 5.4 Destrucción Infraestructura (Terraform)
+### 5.4 Destrucción Infraestructura (Orden Estricto)
+Debemos destruir desde "afuera hacia adentro".
+
+**Paso A: Plataforma (ArgoCD)**
 ```bash
-# 1. Plataforma
-cd iac/live/dev/platform && terragrunt destroy -auto-approve
-# 2. Clúster (Espera ~15 mins)
-cd ../eks && terragrunt destroy -auto-approve
-# 3. Red
-cd ../vpc && terragrunt destroy -auto-approve
+cd iac/live/dev/platform
+terragrunt destroy -auto-approve
 ```
 
-### 5.5 Auditoría Forense Final
+**Paso B: Clúster EKS (Tarda ~15 mins)**
+*Esto eliminará los Nodos (EC2) y el Plano de Control.*
+```bash
+cd ../eks
+terragrunt destroy -auto-approve
+```
+
+**Paso C: Red (VPC)**
+Intenta el borrado normal primero:
+```bash
+cd ../vpc
+terragrunt destroy -auto-approve
+```
+
+🔴 **¿Fallo con `DependencyViolation`?**
+Si el paso anterior falla porque la VPC tiene dependencias "zombies" (ENIs pegadas), ejecuta el script de rescate nuclear:
+```bash
+# Ejecutar desde la raíz del proyecto
+cd ~/kubernetes-platform-engineering
+./scripts/nuke_vpc.sh vpc-XXXXXXXX  # <--- Reemplaza con el ID de tu VPC
+```
+*Una vez corrido el script, vuelve a ejecutar `terragrunt destroy` en la carpeta vpc para finalizar.*
+
+### 5.5 Backend Nuke (Opcional - Borrado Histórico)
+Ejecuta esto **solo si quieres borrar el historial de Terraform** (S3 Bucket y DynamoDB Table). Si planeas volver a usar el lab pronto, puedes saltarte este paso (costo < $0.01/mes).
 ```bash
 cd ~/kubernetes-platform-engineering
-./scripts/deep_sweep_finops.sh
+./scripts/nuke_backend_smart.sh
 ```
+
+### 5.6 Auditoría Forense Final
+El paso de la verdad. Ejecuta esto para confirmar que tu facturación será $0.00.
+```bash
+./scripts/finops_audit_extreme.sh
+```
+*Si todo sale vacío o "terminated", ¡felicidades! Has completado el ciclo.*
