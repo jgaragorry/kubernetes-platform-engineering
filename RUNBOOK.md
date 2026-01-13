@@ -17,7 +17,8 @@ Este documento es la guía definitiva para desplegar, operar y destruir la plata
 3. [Fase 2: GitOps (El Cerebro)](#-fase-2-gitops-el-cerebro)
 4. [Fase 3: SecretOps (Seguridad Bancaria)](#-fase-3-secretops-seguridad-bancaria)
 5. [Fase 4: Validación de la Plataforma](#-fase-4-validación-de-la-plataforma)
-6. [Fase 5: Protocolo FinOps (Destrucción)](#-fase-5-protocolo-finops-destrucción)
+6. [🌟 Fase Bonus: Day 2 Operations](#-fase-bonus-day-2-operations-escalamiento)
+7. [🛑 Fase 5: Protocolo FinOps (Destrucción)](#-fase-5-protocolo-finops-destrucción)
 
 ---
 
@@ -152,6 +153,65 @@ echo "🔓 La contraseña inyectada en el clúster es:"
 kubectl get secret my-db-creds -n backend-ns -o jsonpath="{.data.db_password_k8s}" | base64 -d; echo ""
 ```
 **Resultado Esperado:** `SuperSecretPassword123!`
+
+---
+
+## 🌟 Fase Bonus: Day 2 Operations (Escalamiento)
+
+**Contexto:** Demostraremos la capacidad de la plataforma para agregar un nuevo equipo ("Marketing") y luego eliminarlo usando solo Git.
+
+### 1. Onboarding (Crear Equipo)
+Creamos la definición de la app y la subimos a Git.
+```bash
+# Crear estructura
+mkdir -p gitops/tenants/marketing-team
+
+# Crear App Manifest
+cat <<EOF > gitops/tenants/marketing-team/apps.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: marketing-landing-page
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://stefanprodan.github.io/podinfo
+    targetRevision: 6.7.0
+    chart: podinfo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: marketing-ns
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+EOF
+
+# Push a Git
+git add .
+git commit -m "feat: onboard marketing team"
+git push
+```
+*👉 Ve a ArgoCD y observa cómo aparece la nueva aplicación automáticamente.*
+
+### 2. Offboarding (Eliminar Equipo)
+Simulamos que el proyecto terminó. Borramos el archivo en Git para limpiar el clúster.
+```bash
+# Borrar archivo y carpeta
+git rm gitops/tenants/marketing-team/apps.yaml
+rm -rf gitops/tenants/marketing-team/
+
+# Push a Git
+git add .
+git commit -m "chore: offboard marketing team"
+git push
+```
+*👉 ArgoCD detectará el borrado y eliminará todos los recursos del clúster (Pruning).*
 
 ---
 

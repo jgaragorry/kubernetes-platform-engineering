@@ -18,7 +18,7 @@ El objetivo no es simplemente desplegar un clúster de Kubernetes, sino construi
 1.  **Inmutabilidad:** Toda la infraestructura se define en código (Terraform). Nada se hace "a mano" en la consola.
 2.  **GitOps Puro:** El estado del clúster se sincroniza automáticamente desde Git usando ArgoCD. No más `kubectl apply` manuales.
 3.  **Seguridad Bancaria:** Cero secretos en texto plano. Integración nativa con **AWS Secrets Manager** mediante External Secrets Operator.
-4.  **Escalabilidad:** Uso del patrón **App of Apps** para gestionar cientos de microservicios con un solo punto de entrada.
+4.  **Escalabilidad Dinámica:** Uso del patrón **App of Apps** que permite el Onboarding/Offboarding de equipos (Tenants) simplemente agregando o borrando archivos en Git.
 5.  **FinOps & Disciplina:** Protocolos automatizados de destrucción y auditoría forense para garantizar costos cero cuando no está en uso.
 
 ---
