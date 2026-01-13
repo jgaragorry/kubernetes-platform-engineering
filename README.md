@@ -23,6 +23,60 @@ El objetivo no es simplemente desplegar un clúster de Kubernetes, sino construi
 
 ---
 
+## 🧩 Arquitectura GitOps: Patrón "App of Apps"
+
+Este proyecto utiliza un diseño jerárquico donde una **Aplicación Madre (Root)** gestiona el ciclo de vida de todas las demás aplicaciones (Tenants). Esto permite desplegar la plataforma entera con un solo comando `kubectl apply`.
+
+```mermaid
+graph TD
+    %% Estilos
+    classDef user fill:#2e2e2e,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef root fill:#D946EF,stroke:#333,stroke-width:2px,color:#fff;
+    classDef git fill:#F05032,stroke:#333,stroke-width:2px,color:#fff;
+    classDef infra fill:#00C853,stroke:#333,stroke-width:2px,color:#fff;
+    classDef apps fill:#326CE5,stroke:#333,stroke-width:2px,color:#fff;
+    classDef secret fill:#FFC107,stroke:#333,stroke-width:2px,color:#000;
+
+    %% Actores
+    User((👷 Tú / Admin)):::user
+    Git(("{📂 GitHub Repo \n (gitops/tenants/)}")):::git
+
+    %% Flujo Principal
+    subgraph Control_Plane [1. El Cerebro]
+        Root[("👑 Platform Root App \n (El Jefe)"))]:::root
+    end
+
+    subgraph Tenants [2. Aplicaciones Hijas (Tenants)]
+        Infra[("⚙️ Infrastructure \n (Ext. Secrets Operator)")]:::infra
+        Backend[("📦 Backend Team \n (Guestbook App)")]:::apps
+        Frontend[("💻 Frontend Team \n (Demo App)")]:::apps
+    end
+
+    subgraph Operation [3. Operación Secreta]
+        AWS[("☁️ AWS Secrets Manager")]:::secret
+        K8sSecret[("🔐 Kubernetes Secret \n (Nativo)")]:::secret
+    end
+
+    %% Conexiones con Orden
+    User -->|1. kubectl apply root-app.yaml| Root
+    Root -->|2. Lee carpeta tenants/| Git
+    Git -->|3. Detecta Archivos| Infra & Backend & Frontend
+    Infra -->|4. Instala CRDs| Backend
+    Backend -.->|5. Espera Infra| Infra
+    Infra -->|6. Conecta con| AWS
+    AWS -->|7. Inyecta Password| K8sSecret
+    K8sSecret -->|8. Consume| Backend
+```
+
+**Explicación del Flujo de Trabajo:**
+1.  **Bootstrapping:** El administrador despliega manualmente solo la `Platform Root App` (El Jefe).
+2.  **Auto-Discovery:** La Root App vigila la carpeta `gitops/tenants/` en el repositorio Git.
+3.  **Expansión:** ArgoCD detecta los manifiestos de los equipos (Backend, Frontend, Infra) y despliega sus aplicaciones automáticamente.
+4.  **Gestión de Dependencias:** La aplicación de Infraestructura instala el *External Secrets Operator* antes que el resto.
+5.  **Inyección de Secretos:** Una vez activo, el operador se conecta a AWS, descarga las credenciales de forma segura y las convierte en secretos nativos de Kubernetes (K8s Secret) para que el Backend las consuma sin fricción.
+
+---
+
 ## 🏗️ Arquitectura de la Solución
 
 La plataforma se divide en capas lógicas de responsabilidad:
@@ -103,7 +157,7 @@ El protocolo garantiza la eliminación de:
 
 ## 👨‍💻 Autor
 
-**Tu Nombre**
+**Jesus Garagorry**
 *Cloud Platform Architect | DevOps Engineer | FinOps Enthusiast*
 
 ---
