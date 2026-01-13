@@ -8,11 +8,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: [https://stefanprodan.github.io/podinfo](https://stefanprodan.github.io/podinfo)
+    repoURL: https://stefanprodan.github.io/podinfo
     targetRevision: 6.7.0
     chart: podinfo
   destination:
-    server: [https://kubernetes.default.svc](https://kubernetes.default.svc)
+    server: https://kubernetes.default.svc
     namespace: marketing-ns
   syncPolicy:
     automated:
