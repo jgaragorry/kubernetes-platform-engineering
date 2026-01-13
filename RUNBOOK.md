@@ -7,15 +7,15 @@
 ![External Secrets](https://img.shields.io/badge/External_Secrets-%23000000.svg?style=for-the-badge&logo=cncf&logoColor=white)
 ![FinOps](https://img.shields.io/badge/FinOps-00C853?style=for-the-badge&logo=google-sheets&logoColor=white)
 
-Este documento es la guía definitiva para desplegar, operar y destruir la plataforma de ingeniería basada en Kubernetes (EKS), GitOps (ArgoCD) y SecretOps (External Secrets).
+Este documento es la guía definitiva para desplegar, operar y destruir la plataforma. Está optimizado para **prevenir Race Conditions** inyectando los secretos antes del despliegue de aplicaciones.
 
 ---
 
 ## 📋 Tabla de Contenidos
 1. [Fase 0: Prerrequisitos y Backend](#-fase-0-prerrequisitos-y-backend)
 2. [Fase 1: Infraestructura Base (IaC)](#-fase-1-infraestructura-base-iac)
-3. [Fase 2: GitOps (El Cerebro)](#-fase-2-gitops-el-cerebro)
-4. [Fase 3: SecretOps (Seguridad Bancaria)](#-fase-3-secretops-seguridad-bancaria)
+3. [Fase 2: SecretOps (Preparación de Seguridad)](#-fase-2-secretops-preparación-de-seguridad)
+4. [Fase 3: GitOps (Bootstrapping)](#-fase-3-gitops-bootstrapping)
 5. [Fase 4: Validación de la Plataforma](#-fase-4-validación-de-la-plataforma)
 6. [🌟 Fase Bonus: Day 2 Operations](#-fase-bonus-day-2-operations-escalamiento)
 7. [🛑 Fase 5: Protocolo FinOps (Destrucción Total)](#-fase-5-protocolo-finops-destrucción-total)
@@ -25,7 +25,7 @@ Este documento es la guía definitiva para desplegar, operar y destruir la plata
 ## 🛠️ Fase 0: Prerrequisitos y Backend
 
 ### 💡 ¿Qué estamos haciendo?
-Terraform necesita un lugar seguro para guardar el "estado" de la infraestructura. Ejecutamos este script para crear un Bucket S3 y una tabla DynamoDB.
+Inicializamos el almacenamiento remoto para Terraform (S3 + DynamoDB).
 
 ### Pasos
 1. **Verificar herramientas:** Asegúrate de tener `aws-cli`, `terraform`, `terragrunt` y `kubectl`.
@@ -63,7 +63,7 @@ kubectl get nodes
 ```
 
 ### 1.4 Instalar Plataforma (ArgoCD)
-**Contexto:** Instalamos el motor de GitOps.
+**Contexto:** Instalamos el motor de GitOps base.
 ```bash
 cd ../platform
 terragrunt init
@@ -72,43 +72,22 @@ terragrunt apply -auto-approve
 
 ---
 
-## 🐙 Fase 2: GitOps (El Cerebro)
+## 🔐 Fase 2: SecretOps (Preparación de Seguridad)
 
-### 2.1 Bootstrapping (App of Apps)
-**Contexto:** Conectamos ArgoCD al repositorio Git para que despliegue todas las aplicaciones automáticamente.
+**Contexto:** Preparamos las credenciales *antes* de desplegar las aplicaciones para evitar errores de sincronización (Race Conditions).
+
+### 2.1 Crear el Secreto en la Nube (AWS)
 ```bash
-# Volver a la raíz
+# Volver a la raíz del proyecto
 cd ~/kubernetes-platform-engineering
 
-# Inyectar la App Madre
-kubectl apply -f gitops/control-plane/root-app.yaml
-```
-
-### 2.2 Verificar el Despliegue
-**Contexto:** Validamos visualmente que las apps (Backend, Frontend, External-Secrets) se estén creando.
-```bash
-# Obtener URL
-kubectl get svc -n argocd argocd-server -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"; echo ""
-
-# Obtener Password Admin
-echo "🔑 Password:" && kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo ""
-```
-
----
-
-## 🔐 Fase 3: SecretOps (Seguridad Bancaria)
-
-**Contexto:** Inyectaremos credenciales desde AWS Secrets Manager directamente a Kubernetes.
-
-### 3.1 Crear el Secreto en la Nube (AWS)
-```bash
 aws secretsmanager create-secret \
     --name prod/db-password \
     --secret-string '{"username":"admin","password":"SuperSecretPassword123!"}' \
     --region us-east-1
 ```
 
-### 3.2 Crear Identidad IAM (El Mensajero)
+### 2.2 Crear Identidad IAM (El Mensajero)
 ```bash
 # Crear usuario y política de lectura
 aws iam create-user --user-name eks-secrets-reader
@@ -118,15 +97,13 @@ aws iam attach-user-policy --user-name eks-secrets-reader --policy-arn arn:aws:i
 aws iam create-access-key --user-name eks-secrets-reader > key.json
 ```
 
-### 3.3 Check de Sincronización (⚠️ Anti-Race Condition)
-**Contexto:** ArgoCD puede tardar unos segundos en crear el namespace `external-secrets`. Esperamos a que exista antes de continuar.
+### 2.3 Preparar Namespace (Inyección Preventiva)
+Creamos el namespace manualmente para poder inyectar el secreto antes de que ArgoCD llegue.
 ```bash
-echo "⏳ Esperando a que ArgoCD cree el namespace..."
-until kubectl get ns external-secrets >/dev/null 2>&1; do echo "zzZZzz..."; sleep 5; done
-echo "✅ Namespace detectado. Procediendo."
+kubectl create ns external-secrets --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### 3.4 Conectar el Clúster con AWS
+### 2.4 Conectar el Clúster con AWS
 Inyectamos las credenciales del "Mensajero" en el clúster.
 ```bash
 # Leer valores
@@ -139,8 +116,29 @@ kubectl create secret generic awssm-secret \
   --from-literal=secret-access-key="$SK" \
   -n external-secrets
 
-# Borrar credenciales locales
+# Borrar credenciales locales (Seguridad)
 rm key.json
+```
+
+---
+
+## 🐙 Fase 3: GitOps (Bootstrapping)
+
+**Contexto:** Ahora que los secretos ya existen, desplegamos la "Root App". ArgoCD encontrará todo listo y se pondrá en verde inmediatamente.
+
+### 3.1 Desplegar App of Apps
+```bash
+kubectl apply -f gitops/control-plane/root-app.yaml
+```
+
+### 3.2 Verificar el Despliegue
+**Contexto:** Validamos visualmente que las apps (Backend, Frontend, External-Secrets) se estén creando correctamente.
+```bash
+# Obtener URL de ArgoCD
+kubectl get svc -n argocd argocd-server -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"; echo ""
+
+# Obtener Password Admin
+echo "🔑 Password:" && kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo ""
 ```
 
 ---
