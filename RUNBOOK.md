@@ -1,177 +1,220 @@
-# 📘 AWS EKS Enterprise GitOps - Master Runbook v5.0
+# 📘 AWS EKS Enterprise Platform - Master Runbook
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
 ![Terraform](https://img.shields.io/badge/terraform-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)
-![FinOps](https://img.shields.io/badge/FinOps-Extreme%20Audit-success?style=for-the-badge&logo=cash-app&logoColor=white)
+![ArgoCD](https://img.shields.io/badge/argocd-%23eb5b46.svg?style=for-the-badge&logo=argo&logoColor=white)
+![External Secrets](https://img.shields.io/badge/External_Secrets-%23000000.svg?style=for-the-badge&logo=cncf&logoColor=white)
+![FinOps](https://img.shields.io/badge/FinOps-00C853?style=for-the-badge&logo=google-sheets&logoColor=white)
 
-Este documento es la **Fuente Única de la Verdad**. Sigue los pasos linealmente para desplegar, operar y destruir el laboratorio sin errores ni costos sorpresa.
+Este documento es la guía definitiva para desplegar, operar y destruir la plataforma de ingeniería basada en Kubernetes (EKS), GitOps (ArgoCD) y SecretOps (External Secrets).
 
 ---
 
 ## 📋 Tabla de Contenidos
-1. [Requisitos Previos](#1-requisitos-previos)
-2. [Fase 0: Cimientos (Backend Remoto)](#3-fase-0-cimientos-backend-remoto)
-3. [Fase 1: Infraestructura (VPC & EKS)](#4-fase-1-infraestructura-vpc--eks)
-4. [Fase 2: Plataforma GitOps (ArgoCD)](#5-fase-2-plataforma-gitops-argocd)
-5. [Fase 3: Operación (Canary Deployments)](#6-fase-3-operación-canary-deployments)
-6. [Fase 4: Destrucción Total (Protocolo FinOps)](#7-fase-4-destrucción-total-protocolo-finops)
+1. [Fase 0: Prerrequisitos y Backend](#-fase-0-prerrequisitos-y-backend)
+2. [Fase 1: Infraestructura Base (IaC)](#-fase-1-infraestructura-base-iac)
+3. [Fase 2: GitOps (El Cerebro)](#-fase-2-gitops-el-cerebro)
+4. [Fase 3: SecretOps (Seguridad Bancaria)](#-fase-3-secretops-seguridad-bancaria)
+5. [Fase 4: Validación de la Plataforma](#-fase-4-validación-de-la-plataforma)
+6. [Fase 5: Protocolo FinOps (Destrucción)](#-fase-5-protocolo-finops-destrucción)
 
 ---
 
-## 1. Requisitos Previos
+## 🛠️ Fase 0: Prerrequisitos y Backend
 
-Herramientas necesarias en tu terminal:
-- `aws` (v2+)
-- `terraform` / `terragrunt`
-- `kubectl`
+### 💡 ¿Qué estamos haciendo?
+Terraform necesita un lugar seguro para guardar el "estado" de la infraestructura (el archivo `.tfstate`). No lo guardamos en local ni en Git. Creamos un **Bucket S3** (almacenamiento) y una **Tabla DynamoDB** (bloqueo para evitar colisiones si trabajamos en equipo).
 
-**Permisos de ejecución:**
-Antes de empezar, asegúrate de que los scripts de automatización sean ejecutables.
-```bash
-chmod +x scripts/*.sh
-```
+### Pasos
+1. **Verificar herramientas:** Asegúrate de tener instalados `aws-cli`, `terraform`, `terragrunt` y `kubectl`.
+2. **Inicializar Backend Remoto:**
+   Ejecuta este script automatizado para crear los recursos de soporte en AWS.
 
----
-
-## 3. Fase 0: Cimientos (Backend Remoto)
-
-Creamos el bucket S3 y la tabla DynamoDB para guardar el estado de Terraform de forma segura.
-
-```bash
-# 1. Crear Backend
-./scripts/setup_backend.sh
-
-# 2. Verificar que existe
-./scripts/check_backend.sh
-```
-*Output esperado: `[EXISTE]` en verde.*
+   ```bash
+   ./scripts/setup_backend.sh
+   ```
 
 ---
 
-## 4. Fase 1: Infraestructura (VPC & EKS)
+## 🏗️ Fase 1: Infraestructura Base (IaC)
 
-Provisionamos la red y el clúster de Kubernetes.
+### 1.1 Desplegar la Red (VPC)
+**Contexto:** Antes del clúster, necesitamos las carreteras. Creamos una VPC (Virtual Private Cloud) con subnets públicas (para balanceadores) y privadas (para los nodos), y NAT Gateways para que los servidores privados puedan descargar actualizaciones de internet sin ser expuestos.
 
-### 1. Desplegar Red (VPC)
 ```bash
-cd ~/aws-eks-enterprise-gitops/iac/live/dev/vpc
+cd iac/live/dev/vpc
 terragrunt init
 terragrunt apply -auto-approve
 ```
 
-### 2. Desplegar Clúster (EKS)
+### 1.2 Desplegar el Clúster (EKS)
+**Contexto:** Ahora levantamos el "Control Plane" de Kubernetes (gestionado por AWS) y los "Worker Nodes" (donde vivirán nuestras aplicaciones).
+*Nota: Este paso tarda aproximadamente 15 minutos. Es un buen momento para una pausa.*
+
 ```bash
-cd ~/aws-eks-enterprise-gitops/iac/live/dev/eks
+cd ../eks
 terragrunt init
 terragrunt apply -auto-approve
 ```
 
-### 3. Conectar tu Terminal al Clúster
+### 1.3 Conectar la Terminal
+**Contexto:** El clúster existe, pero tu ordenador no sabe cómo hablar con él. Este comando descarga el certificado digital y configura tu `kubectl` para autenticarse como administrador.
+
 ```bash
 aws eks update-kubeconfig --region us-east-1 --name eks-gitops-dev
 kubectl get nodes
 ```
-*Output esperado: Lista de nodos en estado `Ready`.*
+*Output esperado:* Una lista de nodos en estado `Ready`.
 
----
+### 1.4 Instalar la Plataforma Base (ArgoCD)
+**Contexto:** Instalamos ArgoCD usando Terraform (Helm Provider). ArgoCD será nuestro "Agente de GitOps", encargado de leer nuestro repositorio Git y sincronizar los cambios al clúster automáticamente.
 
-## 5. Fase 2: Plataforma GitOps (ArgoCD)
-
-Instalamos el controlador ArgoCD y registramos la aplicación.
-
-### 1. Instalar ArgoCD
 ```bash
-cd ~/aws-eks-enterprise-gitops/iac/live/dev/platform
+cd ../platform
 terragrunt init
 terragrunt apply -auto-approve
 ```
 
-### 2. Obtener Acceso (URL y Password)
-```bash
-echo "🌐 URL:" && kubectl -n argocd get svc argocd-server -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"; echo ""
-echo "🔑 Pass:" && kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo ""
-```
-*Ingresa a la URL con usuario `admin` y el password obtenido.*
+---
 
-### 3. Bootstrapping de la App (¡Paso Crítico!)
-ArgoCD arranca vacío. Ejecuta esto para conectar el repositorio Git.
+## 🐙 Fase 2: GitOps (El Cerebro)
+
+### 2.1 Bootstrapping (App of Apps)
+**Contexto:** ArgoCD está instalado pero "vacío". En lugar de configurar 100 aplicaciones a mano, aplicamos **un solo manifiesto** llamado `root-app.yaml`. Este patrón le dice a ArgoCD: "Mira esta carpeta en Git y despliega todo lo que encuentres allí". Es la clave de la escalabilidad.
 
 ```bash
-cd ~/aws-eks-enterprise-gitops
-kubectl apply -f gitops-manifests/apps/colors-app.yaml
+# Volver a la raíz del proyecto
+cd ~/kubernetes-platform-engineering
+
+# Inyectar la App Madre
+kubectl apply -f gitops/control-plane/root-app.yaml
 ```
-*Ve al Dashboard de ArgoCD: Deberías ver la tarjeta "colors-app" sincronizando.*
+
+### 2.2 Verificar el Despliegue
+**Contexto:** Accedemos a la consola visual de ArgoCD para confirmar que la magia ocurrió. Deberíamos ver cómo se crean automáticamente las apps de Backend, Frontend e Infraestructura.
+
+1. **Obtener URL del Balanceador:**
+   ```bash
+   kubectl get svc -n argocd argocd-server -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"; echo ""
+   ```
+2. **Obtener Contraseña de Admin:**
+   ```bash
+   echo "🔑 Password:" && kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo ""
+   ```
+3. **Validación:** Entra al navegador. Debes ver 4 aplicaciones (Root, Backend, Frontend, External-Secrets) en estado **Healthy (Verde) 🟢**.
 
 ---
 
-## 6. Fase 3: Operación (Canary Deployments)
+## 🔐 Fase 3: SecretOps (Seguridad Bancaria)
 
-Simularemos un despliegue real de software cambiando la versión de la app.
+**Contexto:** Las contraseñas de base de datos NUNCA deben estar en Git (ni siquiera encriptadas). Usaremos **External Secrets Operator (ESO)**.
+El flujo es: `AWS Secrets Manager (Origen)` -> `ESO (Intermediario)` -> `Kubernetes Secret (Destino)`.
 
-**1. Editar Código:**
-Modifica `app-source/helm-chart/values.yaml`. Cambia `tag: blue` por `tag: green`.
-
-**2. Enviar a Git:**
+### 3.1 Crear el Secreto en la Nube (AWS)
+Creamos la contraseña "real" en la bóveda de seguridad de AWS.
 ```bash
-git add .
-git commit -m "feat: release green version"
-git push
+aws secretsmanager create-secret \
+    --name prod/db-password \
+    --secret-string '{"username":"admin","password":"SuperSecretPassword123!"}' \
+    --region us-east-1
 ```
 
-**3. Observar en ArgoCD:**
-- Argo detectará el cambio y comenzará el despliegue.
-- **Argo Rollouts** detendrá el despliegue al 20% (Estado `Paused`).
-- Verifica los nuevos pods y presiona **"Promote-Full"** en la UI para completar la migración.
+### 3.2 Crear Identidad IAM (El Mensajero)
+Creamos un usuario IAM específico que solo tiene permiso para "Leer Secretos". Esto sigue el principio de **Mínimo Privilegio**.
+```bash
+# Crear usuario y política
+aws iam create-user --user-name eks-secrets-reader
+aws iam attach-user-policy --user-name eks-secrets-reader --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+# Generar llaves y guardarlas temporalmente
+aws iam create-access-key --user-name eks-secrets-reader > key.json
+```
+
+### 3.3 Conectar el Clúster con AWS
+Le entregamos las credenciales del "Mensajero" al operador dentro de Kubernetes para que pueda ir a buscar el secreto.
+*(Este script usa `jq` para leer el json automáticamente. Si no tienes jq, copia los valores del archivo key.json manualmente).*
+
+```bash
+# Leer valores
+AK=$(jq -r .AccessKey.AccessKeyId key.json)
+SK=$(jq -r .AccessKey.SecretAccessKey key.json)
+
+# Crear el secreto puente en el namespace del operador
+kubectl create secret generic awssm-secret \
+  --from-literal=access-key="$AK" \
+  --from-literal=secret-access-key="$SK" \
+  -n external-secrets
+
+# ⚠️ IMPORTANTE: Borrar las credenciales locales por seguridad
+rm key.json
+```
 
 ---
 
-## 7. Fase 4: Destrucción Total (Protocolo FinOps)
+## ✅ Fase 4: Validación de la Plataforma
 
-**⚠️ IMPORTANTE:** Sigue este orden EXACTO para evitar bloqueos y costos "zombies".
-
-### 1. Destruir Infraestructura (De arriba hacia abajo)
-Ignoramos errores de ArgoCD y vamos directo a destruir el clúster para liberar recursos.
+**Contexto:** Es el momento de la verdad. Verificaremos si la contraseña viajó desde AWS, fue desencriptada por el operador y está lista para ser usada por la aplicación, todo sin tocar un archivo de texto plano.
 
 ```bash
-# 1. Destruir EKS (Esto eliminará los Nodos y ArgoCD)
-cd ~/aws-eks-enterprise-gitops/iac/live/dev/eks
-terragrunt destroy -auto-approve
+echo "🔓 La contraseña inyectada en el clúster es:"
+kubectl get secret my-db-creds -n backend-ns -o jsonpath="{.data.db_password_k8s}" | base64 -d; echo ""
+```
 
-# 2. LIMPIEZA PREVENTIVA DE BALANCEADORES (Anti-Deadlock)
-# Este script elimina los Load Balancers huérfanos que bloquean la VPC.
-cd ~/aws-eks-enterprise-gitops
+**Resultado Esperado:** Debes ver `SuperSecretPassword123!` en tu terminal.
+
+---
+
+## 🛑 Fase 5: Protocolo FinOps (Destrucción)
+
+**⚠️ CRÍTICO:** Para garantizar **Costo $0.00** al finalizar, el orden de destrucción es vital. Si borras la VPC antes que los Balanceadores, AWS bloqueará la eliminación y seguirá cobrando.
+
+### 5.1 Soft Delete (Limpieza de Aplicación)
+Pedimos a Kubernetes que borre los balanceadores de carga (ELB) antes de morir.
+```bash
+kubectl delete application -n argocd --all
+```
+
+### 5.2 Limpieza Manual de Seguridad
+Borramos los recursos que creamos a mano (AWS CLI) ya que Terraform no los conoce.
+```bash
+# Borrar secreto de la bóveda
+aws secretsmanager delete-secret --secret-id prod/db-password --force-delete-without-recovery --region us-east-1
+
+# Borrar usuario IAM y sus access keys
+AK_ID=$(aws iam list-access-keys --user-name eks-secrets-reader --query 'AccessKeyMetadata[0].AccessKeyId' --output text)
+aws iam delete-access-key --user-name eks-secrets-reader --access-key-id $AK_ID
+aws iam detach-user-policy --user-name eks-secrets-reader --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
+aws iam delete-user --user-name eks-secrets-reader
+```
+
+### 5.3 Nuke Load Balancers (Seguro de Vida)
+Ejecuta este script para barrer cualquier balanceador huérfano que haya quedado.
+```bash
 ./scripts/nuke_loadbalancers.sh
-
-# 3. Limpieza de Interfaces de Red
-# CORRECCIÓN V5.0: Buscamos por etiqueta 'Name' para asegurar que encontramos el ID
-VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=gitops-platform-dev-vpc" --query "Vpcs[0].VpcId" --output text)
-./scripts/nuke_vpc.sh $VPC_ID
-
-# 4. Destruir VPC (Ahora que está limpia)
-cd ~/aws-eks-enterprise-gitops/iac/live/dev/vpc
-terragrunt destroy -auto-approve
 ```
 
-### 2. Limpieza de Residuos (Zombies)
-Elimina Logs de CloudWatch y llaves KMS que Terraform no borra.
+### 5.4 Destrucción de Infraestructura (Terraform)
+Destruimos las capas en orden inverso a la creación.
 
+1. **Plataforma:**
+   ```bash
+   cd iac/live/dev/platform && terragrunt destroy -auto-approve
+   ```
+2. **Clúster EKS:** (Espera ~15 mins)
+   ```bash
+   cd ../eks && terragrunt destroy -auto-approve
+   ```
+3. **Red VPC:**
+   ```bash
+   cd ../vpc && terragrunt destroy -auto-approve
+   ```
+   *Si falla la VPC, ejecuta `cd ~/kubernetes-platform-engineering && ./scripts/nuke_vpc.sh <VPC_ID>` y reintenta.*
+
+### 5.5 Auditoría Forense (Deep Sweep)
+El paso final. Este script escanea toda la región buscando residuos (Discos, IPs, Llaves KMS).
 ```bash
-cd ~/aws-eks-enterprise-gitops
-./scripts/nuke_zombies.sh
+cd ~/kubernetes-platform-engineering
+./scripts/deep_sweep_finops.sh
 ```
-
-### 3. Eliminar Backend (El Gran Reset)
-Solo ejecuta esto al final. Borra el estado de Terraform.
-
-```bash
-./scripts/nuke_backend_smart.sh
-```
-
-### 4. Auditoría Final Extrema
-Verificación final para garantizar costo $0.
-
-```bash
-./scripts/finops_audit.sh
-```
-*Si todas las tablas están vacías, has completado el laboratorio exitosamente.*
+**Meta:** Todo debe decir **LIMPIO** o **PendingDeletion**.
