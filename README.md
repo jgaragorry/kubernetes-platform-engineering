@@ -39,27 +39,27 @@ graph TD
 
     %% Actores
     User((👷 Tú / Admin)):::user
-    Git(("{📂 GitHub Repo \n (gitops/tenants/)}")):::git
+    Git[["📂 GitHub Repo"]]:::git
 
     %% Flujo Principal
     subgraph Control_Plane [1. El Cerebro]
-        Root[("👑 Platform Root App \n (El Jefe)"))]:::root
+        Root("👑 Platform Root App"):::root
     end
 
-    subgraph Tenants [2. Aplicaciones Hijas (Tenants)]
-        Infra[("⚙️ Infrastructure \n (Ext. Secrets Operator)")]:::infra
-        Backend[("📦 Backend Team \n (Guestbook App)")]:::apps
-        Frontend[("💻 Frontend Team \n (Demo App)")]:::apps
+    subgraph Tenants [2. Aplicaciones Hijas]
+        Infra("⚙️ Infrastructure"):::infra
+        Backend("📦 Backend Team"):::apps
+        Frontend("💻 Frontend Team"):::apps
     end
 
     subgraph Operation [3. Operación Secreta]
         AWS[("☁️ AWS Secrets Manager")]:::secret
-        K8sSecret[("🔐 Kubernetes Secret \n (Nativo)")]:::secret
+        K8sSecret[("🔐 K8s Native Secret")]:::secret
     end
 
     %% Conexiones con Orden
-    User -->|1. kubectl apply root-app.yaml| Root
-    Root -->|2. Lee carpeta tenants/| Git
+    User -->|1. kubectl apply| Root
+    Root -->|2. Lee carpeta| Git
     Git -->|3. Detecta Archivos| Infra & Backend & Frontend
     Infra -->|4. Instala CRDs| Backend
     Backend -.->|5. Espera Infra| Infra
